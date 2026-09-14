@@ -4,11 +4,10 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-User=cenacolo
-Group=cenacolo
-WorkingDirectory=/opt/cenacolo/services/buy
-Environment=CENACOLO_HOME=/opt/cenacolo
+User=__RUN_USER__
+WorkingDirectory=__CENACOLO_HOME__/services/buy
+Environment=CENACOLO_HOME=__CENACOLO_HOME__
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/cenacolo/services/buy/.venv/bin/python run_worker.py --reap --config /opt/cenacolo/etc/buy.local.yaml
+ExecStart=__CENACOLO_HOME__/services/buy/.venv/bin/python run_worker.py --reap --config __CENACOLO_HOME__/etc/buy.local.yaml
 StandardOutput=journal
 StandardError=journal

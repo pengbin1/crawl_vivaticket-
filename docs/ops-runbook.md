@@ -17,14 +17,15 @@ tail -f /opt/cenacolo/var/log/buy-worker.log
 ## 启停（日本机）
 
 ```bash
-# 一键启动（首次也会建目录/venv/systemd）
-sudo bash /opt/cenacolo/deploy/japan-worker/start.sh
+# 一键启动（pengb_dev 下 clone 成 cenacolo 后）
+cd /root/pengb_dev/cenacolo
+sudo bash deploy/japan-worker/start.sh
 
 # 一键恢复：git 拉最新 + 装依赖 + 重启
-sudo bash /opt/cenacolo/deploy/japan-worker/recover.sh
+sudo bash deploy/japan-worker/recover.sh
 
-sudo bash /opt/cenacolo/deploy/japan-worker/stop.sh
-bash /opt/cenacolo/deploy/japan-worker/status.sh
+sudo bash deploy/japan-worker/stop.sh
+bash deploy/japan-worker/status.sh
 
 # 或统一入口
 sudo bash /opt/cenacolo/deploy/japan-worker/ctl.sh start|stop|restart|recover|status

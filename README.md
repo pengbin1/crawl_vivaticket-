@@ -58,25 +58,29 @@ python pool_register.py --count 5
 
 ## 生产目录约定
 
+推荐放在现有日本机目录旁：
+
 ```text
-/opt/cenacolo
-├── services/buy|register   # 本仓对应目录
-├── etc/buy.local.yaml      # 密钥，chmod 600
-├── var/log/
-└── var/artifacts/
+/root/pengb_dev/
+  cenacolo_vivaticket/     # 旧养号（可暂留）
+  hotpepper_gourmet_crawler/
+  cenacolo/                # 本 monorepo（新建）
+    services/buy|register
+    etc/buy.local.yaml
+    var/log/
 ```
 
-`export CENACOLO_HOME=/opt/cenacolo`  
-
-一键脚本（日本机）：
-
 ```bash
-sudo bash deploy/japan-worker/start.sh      # 一键启动
-sudo bash deploy/japan-worker/recover.sh    # 一键恢复（拉代码+重启）
+cd /root/pengb_dev
+git clone http://47.93.55.234:8888/pengbin/crawl_vivaticket.git cenacolo
+cd cenacolo
+sudo bash deploy/japan-worker/start.sh
+sudo bash deploy/japan-worker/recover.sh   # 以后更新
 bash deploy/japan-worker/status.sh
 ```
 
-更多见 `deploy/japan-worker/`、`docs/ops-runbook.md`。
+脚本会自动把 `CENACOLO_HOME` 设为仓库根（`.../pengb_dev/cenacolo`）。  
+也可用 `/opt/cenacolo`，自行 `export CENACOLO_HOME=...` 即可。
 
 ## 文档
 

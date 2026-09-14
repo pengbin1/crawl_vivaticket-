@@ -5,17 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=cenacolo
-Group=cenacolo
-WorkingDirectory=/opt/cenacolo/services/buy
-Environment=CENACOLO_HOME=/opt/cenacolo
+User=__RUN_USER__
+WorkingDirectory=__CENACOLO_HOME__/services/buy
+Environment=CENACOLO_HOME=__CENACOLO_HOME__
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/cenacolo/services/buy/.venv/bin/python run_worker.py --config /opt/cenacolo/etc/buy.local.yaml
+ExecStart=__CENACOLO_HOME__/services/buy/.venv/bin/python run_worker.py --config __CENACOLO_HOME__/etc/buy.local.yaml
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-# Soft hardening
 NoNewPrivileges=true
 PrivateTmp=true
 
