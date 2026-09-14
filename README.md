@@ -72,7 +72,7 @@ python pool_register.py --count 5
 
 ```bash
 cd /root/pengb_dev
-git clone http://47.93.55.234:8888/pengbin/crawl_vivaticket.git cenacolo
+git clone git@github.com:pengbin1/crawl_vivaticket-.git cenacolo
 cd cenacolo
 sudo bash deploy/japan-worker/start.sh
 sudo bash deploy/japan-worker/recover.sh   # 以后更新

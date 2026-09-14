@@ -3,7 +3,7 @@
 #
 # 放在 pengb_dev 下时（推荐）:
 #   cd /root/pengb_dev
-#   git clone http://47.93.55.234:8888/pengbin/crawl_vivaticket.git cenacolo
+#   git clone git@github.com:pengbin1/crawl_vivaticket-.git cenacolo
 #   cd cenacolo
 #   sudo bash deploy/japan-worker/start.sh
 #
@@ -24,7 +24,7 @@ if [[ -z "${CENACOLO_HOME:-}" ]]; then
 fi
 
 # 日本机 pengb_dev 习惯用 root；可用 USER_NAME=cenacolo 改回独立用户
-REPO_URL="${REPO_URL:-http://47.93.55.234:8888/pengbin/crawl_vivaticket.git}"
+REPO_URL="${REPO_URL:-git@github.com:pengbin1/crawl_vivaticket-.git}"
 USER_NAME="${USER_NAME:-root}"
 BUY_DIR="$CENACOLO_HOME/services/buy"
 CFG="$CENACOLO_HOME/etc/buy.local.yaml"
