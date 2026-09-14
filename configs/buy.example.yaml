@@ -1,0 +1,4 @@
+# Copy to /opt/cenacolo/etc/buy.local.yaml (chmod 600)
+# Same schema as services/buy/config.example.yaml
+#
+# Worker: account/order come from Mongo; still need captcha + browser here.

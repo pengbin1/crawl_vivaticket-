@@ -1,0 +1,11 @@
+[Unit]
+Description=Run cenacolo buy reaper every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=cenacolo-buy-reaper.service
+
+[Install]
+WantedBy=timers.target

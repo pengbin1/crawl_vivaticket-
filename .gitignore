@@ -1,8 +1,31 @@
-config.local.yaml
-artifacts/
-.venv/
-__pycache__/
-*.pyc
+# Cenacolo monorepo — Last Supper (Vivaticket) ops stack
+#
+# services/buy       lock seat + pay engine + worker
+# services/register  account farm (email_163 → vivaticket_accounts)
+# deploy/            systemd + install helpers
+# docs/              architecture + runbooks
+# var/               runtime logs & artifacts (not committed)
+# configs/           example configs only
+
+# Secrets / local
+**/*.local.yaml
+**/*.local.env
+**/config.local.yaml
 .env
-.DS_Store
+.env.*
+
+# Runtime
+var/log/*
+!var/log/.gitkeep
+var/artifacts/*
+!var/artifacts/.gitkeep
+**/artifacts/
+**/.venv/
+**/__pycache__/
+*.pyc
 *.log
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/

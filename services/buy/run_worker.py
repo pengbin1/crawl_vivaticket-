@@ -12,13 +12,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shared.config import load_config
-from shared.log import get_logger
+from shared.log import get_logger, setup_logging
 from worker.mongo_api import HttpStore
 from worker.orders import seed_order
 from worker.pipeline import process_once
 from worker.reaper import reap_expired
 
-logger = get_logger("cenacolo_worker")
+logger = get_logger("buy.worker")
 
 
 def _worker_id() -> str:
@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--idle-poll", type=float, default=5.0, help="seconds when queue empty")
     args = parser.parse_args(argv)
 
+    setup_logging(service="buy-worker")
     store = HttpStore()
     if args.seed_order:
         dates = [d.strip() for d in args.dates.split(",") if d.strip()]

@@ -1,0 +1,23 @@
+[Unit]
+Description=Cenacolo buy worker (lock seats, phase1 no auto-pay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cenacolo
+Group=cenacolo
+WorkingDirectory=/opt/cenacolo/services/buy
+Environment=CENACOLO_HOME=/opt/cenacolo
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/cenacolo/services/buy/.venv/bin/python run_worker.py --config /opt/cenacolo/etc/buy.local.yaml
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# Soft hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

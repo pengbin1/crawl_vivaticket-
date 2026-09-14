@@ -13,9 +13,9 @@ sys.path.insert(0, str(ROOT))
 from payer.http_pay import open_axerve_from_payment_url
 from payer.secure_waf import bootstrap_secure_session
 from shared.config import load_config
-from shared.log import get_logger
+from shared.log import get_logger, setup_logging
 
-logger = get_logger("pay_probe")
+logger = get_logger("buy.pay_probe")
 
 
 def main() -> int:
@@ -24,6 +24,7 @@ def main() -> int:
     ap.add_argument("--config", default=str(ROOT / "config.local.yaml"))
     args = ap.parse_args()
 
+    setup_logging(service="buy-probe")
     cfg = load_config(args.config)
     qs = parse_qs(urlparse(args.payment_url).query)
     custref = (qs.get("custref") or [""])[0]

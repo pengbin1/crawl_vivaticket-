@@ -1,0 +1,15 @@
+[Unit]
+Description=Cenacolo register batch (manual / cron trigger)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cenacolo
+Group=cenacolo
+WorkingDirectory=/opt/cenacolo/services/register
+Environment=CENACOLO_HOME=/opt/cenacolo
+Environment=PYTHONUNBUFFERED=1
+# Override count via: systemctl start cenacolo-register.service
+ExecStart=/opt/cenacolo/services/register/.venv/bin/python pool_register.py --count 5
+StandardOutput=journal
+StandardError=journal

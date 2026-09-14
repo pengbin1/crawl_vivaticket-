@@ -1,29 +1,86 @@
-# Cenacolo Buy
+# Cenacolo Monorepo
 
-无人值守抢票 + 自动支付（Leonardo da Vinci *Last Supper* / Cenacolo Vinciano）。
+Vivaticket「最后的晚餐」方案 B：**养号 + 订单驱动锁座（一期不自动扣款）**。
 
-设计: `docs/superpowers/specs/2026-08-13-cenacolo-buy-design.md`
+远程仓库名可能仍是 `crawl_vivaticket`，本仓内容以本文为准。
 
-## 流程
+## 目录
 
-1. Drission 过 Incapsula / Safetynet，导出 cookie  
-2. HTTP 登录 → 查库存 → 打码锁座 → 实名 → `bloccaCarrello`  
-3. 锁座成功后 **立刻** 支付（约 20 分钟窗口）  
-4. 默认 Drission 自动填卡；可选短超时 HTTP 支付尝试  
-
-## 配置
-
-```bash
-cp config.example.yaml config.local.yaml
-# 填写账号、打码 key、卡信息
-pip install -r requirements.txt
-python run_once.py
+```text
+services/buy/        抢票引擎 + Worker（锁座 → payment_url）
+services/register/   养号（刷 vivaticket_accounts ready）
+deploy/              systemd / 安装脚本
+docs/                架构与运维手册
+configs/             仅示例配置
+var/log|artifacts    运行日志与调试 HTML（gitignore）
 ```
 
-`config.local.yaml` 已 gitignore，勿提交卡号/密码。
+## 服务依赖
 
-## 说明
+```text
+register  →  Mongo vivaticket_accounts (ready)
+预约 API  →  Mongo cenacolo_orders (queued)     # 外部，暂不在本仓
+buy-worker → 领单 + 租号 + 锁座 → payment_url
+```
 
-- 不修改旧项目 `crawl_vivaticket` / `cenacolo_vivaticket`  
-- 浏览器自动化只用 DrissionPage  
-- 正常路径不需要人点击  
+外部：`https://dingstest.133.cn/mongo_api`、YesCaptcha、Chrome/Chromium。
+
+## 快速开始（开发机）
+
+### Buy
+
+```bash
+cd services/buy
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp config.example.yaml config.local.yaml   # 填 captcha / browser；worker 账号来自 Mongo
+export CENACOLO_HOME="$(cd ../.. && pwd)"  # 日志写到仓库 var/log
+python run_worker.py --seed-order --any --passengers Peng:Bin
+python run_worker.py --once
+```
+
+单机调试（配置里写死账号）：
+
+```bash
+python run_once.py --lock-only
+```
+
+### Register
+
+```bash
+cd services/register
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+python pool_register.py --available
+python pool_register.py --count 5
+```
+
+## 生产目录约定
+
+```text
+/opt/cenacolo
+├── services/buy|register   # 本仓对应目录
+├── etc/buy.local.yaml      # 密钥，chmod 600
+├── var/log/
+└── var/artifacts/
+```
+
+`export CENACOLO_HOME=/opt/cenacolo`  
+systemd 单元见 `deploy/japan-worker/`、`deploy/register-host/`。
+
+## 文档
+
+- [架构](docs/architecture.md)
+- [运维手册](docs/ops-runbook.md)
+- [Monorepo 设计](docs/superpowers/specs/2026-09-14-cenacolo-monorepo-design.md)
+- [Worker/账号池设计](docs/2026-08-17-reservation-worker-account-pool-design.md)
+
+## 上线顺序
+
+1. Mongo API + 集合可读可写  
+2. register 刷出 ready 账号  
+3. 日本机 buy-worker systemd  
+4. seed 订单验证锁座  
+5. 预约 API 写真实单  
+6. VCC 就绪后再开自动支付  

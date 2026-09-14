@@ -12,10 +12,10 @@ if str(ROOT) not in sys.path:
 from locker.pipeline import run_locker
 from payer.orchestrator import pay_job
 from shared.config import load_config
-from shared.log import get_logger
+from shared.log import default_artifact_dir, get_logger, setup_logging
 from shared.notify import dump_json, notify
 
-logger = get_logger("cenacolo_buy")
+logger = get_logger("buy.run_once")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,9 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    setup_logging(service="buy-once")
     cfg = load_config(args.config)
-    artifacts = ROOT / "artifacts"
-    artifacts.mkdir(exist_ok=True)
+    artifacts = default_artifact_dir()
+    artifacts.mkdir(parents=True, exist_ok=True)
 
     notify(
         f"[cenacolo_buy] start account={cfg.email} prefer_browser={cfg.prefer_browser}",

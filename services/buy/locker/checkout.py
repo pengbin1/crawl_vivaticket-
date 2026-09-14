@@ -148,10 +148,10 @@ def extract_sitekey(price_html: str) -> str | None:
 
 
 def _dump_debug(name: str, html_text: str) -> None:
-    from pathlib import Path
+    from shared.log import default_artifact_dir
 
-    path = Path(__file__).resolve().parents[1] / "artifacts" / name
-    path.parent.mkdir(exist_ok=True)
+    path = default_artifact_dir() / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html_text, encoding="utf-8")
     logger.info("[checkout] wrote debug html %s len=%s", path, len(html_text))
 

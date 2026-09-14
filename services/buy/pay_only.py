@@ -14,10 +14,10 @@ sys.path.insert(0, str(ROOT))
 
 from payer.orchestrator import pay_job
 from shared.config import load_config
-from shared.log import get_logger
+from shared.log import get_logger, setup_logging
 from shared.models import PaymentJob, utc_now
 
-logger = get_logger("pay_only")
+logger = get_logger("buy.pay_only")
 
 
 def main() -> int:
@@ -26,6 +26,7 @@ def main() -> int:
     ap.add_argument("--config", default=str(ROOT / "config.local.yaml"))
     args = ap.parse_args()
 
+    setup_logging(service="buy-pay")
     cfg = load_config(args.config)
     qs = parse_qs(urlparse(args.payment_url).query)
     custref = (qs.get("custref") or [""])[0]
