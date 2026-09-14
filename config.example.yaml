@@ -1,0 +1,50 @@
+account:
+  email: "your@email.com"
+  password: "SET_ME"
+
+event:
+  base: "https://cenacolovinciano.vivaticket.it"
+  path: "/en/event/cenacolo-vinciano/151991"
+  idt: "2547"
+  target_dates: []          # empty + use_any_available => first date with seats
+  use_any_available: true
+  ticket_count: 1
+  poll_when_empty: false
+  poll_interval_seconds: 30
+
+passengers:
+  - first_name: "peng"
+    last_name: "bin"
+
+captcha:
+  client_key: "SET_ME"
+  use_china_endpoint: false
+  timeout_seconds: 90
+
+payment:
+  lock_ttl_seconds: 1200
+  http_attempt_timeout_seconds: 45
+  urgent_remaining_seconds: 120
+  # true: skip HTTP pay and go straight to Drission (recommended v1)
+  prefer_browser: true
+  card:
+    number: ""
+    expiry: ""              # MM/YY
+    cvv: ""
+    first_name: ""
+    last_name: ""
+    email: ""
+
+browser:
+  headless: true
+  proxy: ""
+  get_timeout: 25
+
+notify:
+  feishu_webhook: ""
+  feishu_secret: ""
+
+# Reservation worker (phase 1: lock seat + write payment_url, no auto-pay)
+# python run_worker.py --seed-order --passengers Peng:Bin --dates 2026-09-10 --any
+# python run_worker.py --once
+# python run_worker.py

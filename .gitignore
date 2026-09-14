@@ -1,0 +1,8 @@
+config.local.yaml
+artifacts/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+*.log
