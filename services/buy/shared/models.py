@@ -54,6 +54,11 @@ class PaymentJob:
     shop: str = "CV0"
     event_id: str = "151991"
     cookies: dict[str, str] = field(default_factory=dict)
+    # Persisted VCC ids for retry without opening a new card.
+    vcc_client_request_id: str = ""
+    vcc_application_id: str = ""
+    vcc_order_id: str = ""
+    vcc_card_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -65,7 +70,10 @@ class PaymentJob:
 @dataclass
 class PayResult:
     ok: bool
-    method: str  # http | browser | none
+    method: str  # http | browser | vcc | none
     message: str
     final_url: str = ""
     raw_hint: str = ""
+    confirmed: bool = False
+    vcc_order_id: str = ""
+    purchase_id: str = ""

@@ -165,15 +165,193 @@ def write_locked(store: Any, order_id: str, job: Any) -> None:
             "result.job_id": job.job_id,
             "result.date": job.date,
             "result.time": job.time,
+            "result.tcode": getattr(job, "tcode", None),
+            "result.pcode": getattr(job, "pcode", None),
+            "result.ticket_count": getattr(job, "ticket_count", None),
+            "result.event_id": getattr(job, "event_id", None) or "151991",
+            "result.shop": getattr(job, "shop", None) or "CV0",
             "result.custref": job.custref,
             "result.payment_url": job.payment_url,
             "result.amount_cents": job.amount_cents,
             "result.deadline_at": deadline_iso,
+            # Keep seat-hold deadline on the order so pay worker / reaper can see it.
             "worker.lease_until": deadline_iso,
+            "worker.worker_id": None,
+            "worker.lease_token": None,
+            "last_error.code": None,
+            "last_error.message": None,
+            "last_error.stage": None,
+            "last_error.retryable": None,
+        },
+    )
+
+
+def claim_locked_for_pay(
+    store: Any,
+    worker_id: str,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int = LEASE_SECONDS,
+    order_id: str | None = None,
+) -> dict[str, Any] | None:
+    """
+    Atomically claim one locked order for payment: locked → paying.
+    If order_id is set, only try that order (queue-driven).
+    """
+    moment = now or datetime.now(timezone.utc)
+    now_iso = to_iso(moment)
+    if order_id:
+        rows = store.find(ORDERS_COLLECTION, {"order_id": order_id}, limit=1)
+        candidates = rows
+    else:
+        candidates = store.find(
+            ORDERS_COLLECTION,
+            {
+                "status": "locked",
+                "result.payment_url": {"$exists": True, "$ne": None},
+                "result.deadline_at": {"$gt": now_iso},
+            },
+            limit=20,
+            sort={"result.deadline_at": 1, "updated_at": 1},
+        )
+    for cand in candidates:
+        if (cand.get("status") or "") != "locked":
+            continue
+        result = cand.get("result") or {}
+        if not result.get("payment_url") or not result.get("custref"):
+            continue
+        deadline = result.get("deadline_at")
+        if deadline and deadline <= now_iso:
+            continue
+        token = secrets.token_hex(16)
+        lease_until = moment + timedelta(seconds=lease_seconds)
+        if deadline:
+            try:
+                from datetime import datetime as _dt
+
+                dl = _dt.fromisoformat(str(deadline).replace("Z", "+00:00"))
+                if dl.tzinfo is None:
+                    dl = dl.replace(tzinfo=timezone.utc)
+                if dl > lease_until:
+                    lease_until = dl
+            except Exception:
+                pass
+        n = store.update(
+            ORDERS_COLLECTION,
+            {
+                "order_id": cand["order_id"],
+                "status": "locked",
+                "version": cand.get("version"),
+            },
+            {
+                "status": "paying",
+                "version": int(cand.get("version") or 1) + 1,
+                "worker.worker_id": worker_id,
+                "worker.lease_token": token,
+                "worker.lease_until": to_iso(lease_until),
+                "worker.heartbeat_at": now_iso,
+                "updated_at": now_iso,
+                "last_error.code": None,
+                "last_error.message": None,
+            },
+        )
+        if n == 1:
+            return get_order(store, cand["order_id"])
+    return None
+
+
+def write_vcc_ids(
+    store: Any,
+    order_id: str,
+    *,
+    client_request_id: str = "",
+    application_id: str = "",
+    order_id_vcc: str = "",
+    card_id: str = "",
+) -> None:
+    """Persist non-sensitive VCC ids on the order so retries reuse the same card."""
+    fields: dict[str, Any] = {}
+    if client_request_id:
+        fields["result.vcc_client_request_id"] = client_request_id
+    if application_id:
+        fields["result.vcc_application_id"] = application_id
+    if order_id_vcc:
+        fields["result.vcc_order_id"] = order_id_vcc
+    if card_id:
+        fields["result.vcc_card_id"] = card_id
+    if fields:
+        patch_order(store, order_id, fields)
+
+
+def write_paid(
+    store: Any,
+    order_id: str,
+    *,
+    purchase_id: str = "",
+    vcc_order_id: str = "",
+    final_url: str = "",
+    payment_method: str = "",
+) -> None:
+    patch_order(
+        store,
+        order_id,
+        {
+            "status": "paid",
+            "paid_at": iso_now(),
+            "result.purchase_id": purchase_id or None,
+            "result.vcc_order_id": vcc_order_id or None,
+            "result.final_url": final_url or None,
+            "result.payment_method": payment_method or None,
+            "worker.worker_id": None,
+            "worker.lease_token": None,
             "last_error.code": None,
             "last_error.message": None,
         },
     )
+
+
+def write_pay_failed(
+    store: Any,
+    order: dict[str, Any],
+    *,
+    code: str,
+    message: str,
+    retryable: bool = False,
+) -> dict[str, Any]:
+    """
+    Pay failed: do not bounce to queued (seat already held).
+    retryable + still inside deadline → back to locked for another pay attempt;
+    otherwise → manual_review.
+    """
+    now = datetime.now(timezone.utc)
+    now_iso = to_iso(now)
+    deadline = (order.get("result") or {}).get("deadline_at") or ""
+    still_open = bool(deadline and deadline > now_iso)
+    if retryable and still_open:
+        status = "locked"
+        fields = {
+            "status": status,
+            "worker.worker_id": None,
+            "worker.lease_token": None,
+            "worker.lease_until": deadline,
+            "last_error.code": code,
+            "last_error.stage": "pay",
+            "last_error.message": (message or "")[:500],
+            "last_error.retryable": True,
+            "last_error.at": now_iso,
+        }
+    else:
+        status = "manual_review"
+        fields = {
+            "status": status,
+            "last_error.code": code,
+            "last_error.stage": "pay",
+            "last_error.message": (message or "")[:500],
+            "last_error.retryable": False,
+            "last_error.at": now_iso,
+        }
+    patch_order(store, order["order_id"], fields)
+    return get_order(store, order["order_id"]) or order
 
 
 def finish_attempt(

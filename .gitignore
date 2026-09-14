@@ -19,6 +19,8 @@ var/log/*
 !var/log/.gitkeep
 var/artifacts/*
 !var/artifacts/.gitkeep
+var/pay_queue/*
+!var/pay_queue/.gitkeep
 **/artifacts/
 **/.venv/
 **/__pycache__/

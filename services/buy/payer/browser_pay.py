@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 from DrissionPage import ChromiumPage
 
@@ -9,6 +10,10 @@ from shared.config import AppConfig, CardConfig
 from shared.deadline import assert_time_left, seconds_remaining
 from shared.log import get_logger
 from shared.models import PayResult, PaymentJob
+
+if TYPE_CHECKING:
+    from payer.vcc.client import VccClient
+    from payer.vcc.models import VccPayContext
 
 logger = get_logger(__name__)
 
@@ -80,9 +85,11 @@ def step_fill_card_info(page: ChromiumPage, card: CardConfig) -> None:
         ele.clear()
         ele.input(value)
         try:
-            ele.run_js("this.dispatchEvent(new Event('input', {bubbles:true}));"
-                       "this.dispatchEvent(new Event('change', {bubbles:true}));"
-                       "this.dispatchEvent(new Event('blur', {bubbles:true}));")
+            ele.run_js(
+                "this.dispatchEvent(new Event('input', {bubbles:true}));"
+                "this.dispatchEvent(new Event('change', {bubbles:true}));"
+                "this.dispatchEvent(new Event('blur', {bubbles:true}));"
+            )
         except Exception:
             pass
 
@@ -168,7 +175,7 @@ def step_select_dcc_if_present(page: ChromiumPage) -> None:
         if ele:
             try:
                 ele.click()
-                logger.info("[browser_pay] selected DCC EUR (dcc_off)")
+                logger.info("[浏览器支付] 已选择原币种 EUR（关闭 DCC）")
                 time.sleep(0.5)
                 return
             except Exception:
@@ -210,8 +217,109 @@ def step_submit_pay(page: ChromiumPage) -> None:
         )
     if not btn:
         raise RuntimeError("未找到支付提交按钮")
-    logger.info("[browser_pay] click pay btn text=%r", (btn.text or "")[:40])
+    logger.info("[浏览器支付] 点击支付按钮 text=%r", (btn.text or "")[:40])
     btn.click()
+
+
+def _find_otp_input(page: ChromiumPage):
+    locators = [
+        "css:input[name*='otp' i]",
+        "css:input[id*='otp' i]",
+        "css:input[autocomplete='one-time-code']",
+        "css:input[name*='password' i]",
+        "css:input[placeholder*='OTP' i]",
+        "css:input[placeholder*='codice' i]",
+        "css:input[placeholder*='code' i]",
+        "css:input[type='tel']",
+        "css:input[maxlength='6']",
+        "css:input[maxlength='8']",
+    ]
+    frames = [page]
+    try:
+        frames.extend(page.get_frames() or [])
+    except Exception:
+        pass
+    for frame in frames:
+        ele = try_find_any(frame, locators, timeout=1.5)
+        if ele:
+            return frame, ele
+    return None, None
+
+
+def _submit_otp_if_possible(target, page: ChromiumPage) -> None:
+    btn = try_find_any(
+        target,
+        [
+            "xpath://button[contains(., 'Confirm')]",
+            "xpath://button[contains(., 'Conferma')]",
+            "xpath://button[contains(., 'Submit')]",
+            "xpath://button[contains(., 'Continue')]",
+            "xpath://button[contains(., 'Continua')]",
+            "css:button[type='submit']",
+        ],
+        timeout=3,
+    )
+    if btn:
+        try:
+            btn.click()
+        except Exception:
+            pass
+        return
+    try:
+        page.actions.key_down("ENTER").key_up("ENTER")
+    except Exception:
+        pass
+
+
+def step_handle_3ds_otp(
+    page: ChromiumPage,
+    job: PaymentJob,
+    cfg: AppConfig,
+    vcc_ctx: "VccPayContext",
+    vcc_client: "VccClient",
+) -> None:
+    """Wait OTP after submit (register already done before click), fill without logging."""
+    from payer.vcc.otp import wait_for_otp_code
+
+    otp_deadline = time.time() + min(25, max(8, seconds_remaining(job.deadline_at) - 15))
+    frame = None
+    otp_input = None
+    while time.time() < otp_deadline:
+        if _looks_success(page):
+            return
+        frame, otp_input = _find_otp_input(page)
+        if otp_input:
+            break
+        time.sleep(0.8)
+
+    if not otp_input:
+        logger.info("[浏览器支付] 未检测到 3DS 验证码输入框，继续等结果页")
+        return
+
+    started_epoch = time.time()
+    try:
+        from datetime import datetime
+
+        started_epoch = datetime.fromisoformat(
+            vcc_ctx.started_at.replace("Z", "+00:00")
+        ).timestamp()
+    except Exception:
+        pass
+
+    code = wait_for_otp_code(
+        vcc_client,
+        vcc_ctx.payment_id,
+        overall_deadline=time.time() + max(5, seconds_remaining(job.deadline_at) - 5),
+        started_at_epoch=started_epoch,
+        max_age_seconds=cfg.vcc.otp_max_age_seconds,
+    )
+    try:
+        otp_input.clear()
+        otp_input.input(code)
+    finally:
+        del code
+    _submit_otp_if_possible(frame or page, page)
+    logger.info("[浏览器支付] 已提交 3DS 验证码（验证码本身不写日志）")
 
 
 def _looks_success(page: ChromiumPage) -> bool:
@@ -254,6 +362,9 @@ def browser_pay(
     cfg: AppConfig,
     page: ChromiumPage | None = None,
     start_url: str | None = None,
+    *,
+    vcc_ctx: "VccPayContext | None" = None,
+    vcc_client: "VccClient | None" = None,
 ) -> PayResult:
     assert_time_left(job.deadline_at, need_seconds=30)
     if not cfg.card.ready():
@@ -272,10 +383,13 @@ def browser_pay(
     url = start_url or job.payment_url
     try:
         left = seconds_remaining(job.deadline_at)
-        logger.info("[browser_pay] open url remaining=%.0fs ****%s", left, cfg.card.last4())
+        logger.info(
+            "[浏览器支付] 打开支付页 剩余=%.0fs 卡末四位=****%s",
+            left,
+            cfg.card.last4(),
+        )
         page.get(url, timeout=60)
 
-        # If still on formtr selection page
         if page.ele("#pmcreditcard", timeout=3):
             step_choose_credit_card(page)
             time.sleep(2.5)
@@ -283,26 +397,59 @@ def browser_pay(
         step_fill_card_info(page, cfg.card)
         time.sleep(1.0)
         step_select_dcc_if_present(page)
+
+        if vcc_ctx is not None and vcc_client is not None:
+            from payer.vcc.otp import register_otp_context
+
+            register_otp_context(
+                vcc_client,
+                payment_id=vcc_ctx.payment_id,
+                card_id=vcc_ctx.sensitive.card_id
+                or (vcc_ctx.application.card_id or ""),
+                card_last4=vcc_ctx.sensitive.last4(),
+                amount=vcc_ctx.cost_amount,
+                currency=vcc_ctx.cost_currency,
+                started_at=vcc_ctx.started_at,
+                expected_merchant=cfg.vcc.expected_merchant,
+            )
+            logger.info(
+                "[浏览器支付] 提交前已登记 3DS 上下文 payment_id=%s "
+                "vcc_order_id=%s",
+                vcc_ctx.payment_id,
+                vcc_ctx.application.order_id,
+            )
+
         step_submit_pay(page)
 
-        # wait for navigation / result
+        if vcc_ctx is not None and vcc_client is not None:
+            step_handle_3ds_otp(page, job, cfg, vcc_ctx, vcc_client)
+
         end = time.time() + min(90, max(20, seconds_remaining(job.deadline_at) - 10))
         while time.time() < end:
             if _looks_success(page):
-                return PayResult(True, "browser", "payment success heuristics matched", page.url)
+                logger.info("[浏览器支付] 检测到成功页 url=%s", page.url)
+                return PayResult(
+                    True,
+                    "browser",
+                    "已匹配支付成功页",
+                    page.url,
+                    confirmed=True,
+                )
             time.sleep(1.0)
 
-        # unknown outcome — treat as submitted but unverified
         return PayResult(
             False,
             "browser",
             "已提交支付，但未确认成功页（可能 3DS/异步）；请检查邮箱/订单",
             final_url=page.url or "",
             raw_hint="unverified",
+            confirmed=False,
         )
     except Exception as exc:
-        logger.exception("[browser_pay] failed")
-        return PayResult(False, "browser", str(exc), final_url=getattr(page, "url", "") or "")
+        logger.exception("[浏览器支付] 失败")
+        return PayResult(
+            False, "browser", str(exc), final_url=getattr(page, "url", "") or ""
+        )
     finally:
         if owns_page:
             try:

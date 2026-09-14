@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from shared.config import AppConfig, CardConfig
+from shared.config import AppConfig, CardConfig, PayQueueConfig, VccConfig
 from shared.models import Passenger, PaymentJob
 from worker.accounts import release_account, reserve_account
 from worker.adapter import build_app_config
@@ -43,6 +43,8 @@ def _base_cfg() -> AppConfig:
         urgent_remaining_seconds=120,
         prefer_browser=True,
         card=CardConfig(),
+        vcc=VccConfig(),
+        pay_queue=PayQueueConfig(enabled=True, wake_url=""),
         headless=True,
         proxy="",
         browser_get_timeout=25,
@@ -129,33 +131,118 @@ def test_adapter_overrides_yaml_with_order_and_account():
     assert cfg.poll_when_empty is False
 
 
-def test_lock_success_writes_payment_url_and_does_not_pay():
+def test_lock_success_writes_payment_url_and_releases_account():
     store = MemoryStore()
     seed_order(store, passengers=[{"first_name": "Peng", "last_name": "Bin"}])
     _ready_account(store)
-    paid = {"called": False}
 
     def locker(cfg):
         return _job(cfg), None, None
-
-    def payer(*_a, **_k):
-        paid["called"] = True
-        raise AssertionError("phase-1 worker must not auto-pay")
 
     outcome = process_once(
         store,
         _base_cfg(),
         worker_id="w1",
         locker_fn=locker,
-        pay_fn=payer,
     )
     assert outcome is not None
     assert outcome["status"] == "locked"
     assert outcome["result"]["custref"] == "VIVATK1"
     assert "formtr.php" in outcome["result"]["payment_url"]
-    assert paid["called"] is False
+    assert outcome["worker"]["worker_id"] is None
     acct = store.find("vivaticket_accounts", {"email": "ready@163.com"}, limit=1)[0]
-    assert acct["status"] == "reserved"
+    assert acct["status"] == "ready"
+
+
+def test_lock_enqueues_pay_job():
+    import tempfile
+    from dataclasses import replace
+
+    from worker.queue_util import make_pay_queue
+
+    store = MemoryStore()
+    seed_order(store, passengers=[{"first_name": "Peng", "last_name": "Bin"}])
+    _ready_account(store)
+    qdir = Path(tempfile.mkdtemp())
+    cfg = replace(
+        _base_cfg(),
+        pay_queue=PayQueueConfig(
+            enabled=True, queue_dir=str(qdir), wake_url=""
+        ),
+    )
+
+    def locker(c):
+        return _job(c), None, None
+
+    outcome = process_once(store, cfg, worker_id="w1", locker_fn=locker)
+    assert outcome["status"] == "locked"
+    q = make_pay_queue(cfg)
+    assert q.pending_count() == 1
+    job = q.claim_next("pay-1")
+    assert job is not None
+    assert job.order_id == outcome["order_id"]
+    assert job.custref == "VIVATK1"
+    q.ack(job.order_id)
+    assert q.pending_count() == 0
+
+
+def test_pay_worker_claims_locked_and_marks_paid():
+    from worker.orders import claim_locked_for_pay, write_locked
+    from worker.pay_pipeline import process_pay_once
+    from shared.models import PayResult
+
+    store = MemoryStore()
+    seed_order(store, passengers=[{"first_name": "Peng", "last_name": "Bin"}])
+    claimed = claim_order(store, worker_id="lock-1")
+    assert claimed is not None
+    write_locked(store, claimed["order_id"], _job(_base_cfg()))
+
+    first = claim_locked_for_pay(store, worker_id="pay-1")
+    second = claim_locked_for_pay(store, worker_id="pay-2")
+    assert first is not None
+    assert first["status"] == "paying"
+    assert second is None
+
+    # Reset to locked for full pipeline test
+    store.update(
+        "cenacolo_orders",
+        {"order_id": claimed["order_id"]},
+        {"status": "locked", "version": int(first["version"]) + 1},
+    )
+
+    def payer(job, cfg, page=None):
+        assert job.custref == "VIVATK1"
+        return PayResult(
+            True,
+            "vcc",
+            "ok",
+            confirmed=True,
+            purchase_id="PUR-1",
+            vcc_order_id="VCC-1",
+        )
+
+    outcome = process_pay_once(
+        store, _base_cfg(), worker_id="pay-9", pay_fn=payer, prefer_queue=False
+    )
+    assert outcome is not None
+    assert outcome["status"] == "paid"
+    assert outcome["result"]["purchase_id"] == "PUR-1"
+    assert outcome["result"]["vcc_order_id"] == "VCC-1"
+
+
+def test_payment_job_from_order():
+    from worker.adapter import payment_job_from_order
+    from worker.orders import write_locked
+
+    store = MemoryStore()
+    order = seed_order(store, passengers=[{"first_name": "Peng", "last_name": "Bin"}])
+    write_locked(store, order["order_id"], _job(_base_cfg()))
+    refreshed = store.find("cenacolo_orders", {"order_id": order["order_id"]}, limit=1)[0]
+    job = payment_job_from_order(refreshed)
+    assert job.custref == "VIVATK1"
+    assert job.amount_cents == 1500
+    assert "formtr.php" in job.payment_url
+
 
 
 def test_no_inventory_waits_and_returns_account():
@@ -254,7 +341,10 @@ if __name__ == "__main__":
     test_two_workers_cannot_claim_same_order()
     test_claim_skips_order_before_next_attempt()
     test_adapter_overrides_yaml_with_order_and_account()
-    test_lock_success_writes_payment_url_and_does_not_pay()
+    test_lock_success_writes_payment_url_and_releases_account()
+    test_lock_enqueues_pay_job()
+    test_pay_worker_claims_locked_and_marks_paid()
+    test_payment_job_from_order()
     test_no_inventory_waits_and_returns_account()
     test_reaper_recovers_expired_processing_order()
     test_reaper_does_not_auto_retry_locked_order()

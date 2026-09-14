@@ -1,5 +1,5 @@
 [Unit]
-Description=Cenacolo buy lock worker (lock seats only, no pay)
+Description=Cenacolo buy pay worker (pay locked orders within seat-hold window)
 After=network-online.target
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ User=__RUN_USER__
 WorkingDirectory=__CENACOLO_HOME__/services/buy
 Environment=CENACOLO_HOME=__CENACOLO_HOME__
 Environment=PYTHONUNBUFFERED=1
-ExecStart=__CENACOLO_HOME__/services/buy/.venv/bin/python run_worker.py --config __CENACOLO_HOME__/etc/buy.local.yaml
+ExecStart=__CENACOLO_HOME__/services/buy/.venv/bin/python run_pay_worker.py --config __CENACOLO_HOME__/etc/buy.local.yaml
 Restart=always
 RestartSec=5
 StandardOutput=journal

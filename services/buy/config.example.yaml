@@ -27,6 +27,7 @@ payment:
   urgent_remaining_seconds: 120
   # true: skip HTTP pay and go straight to Drission (recommended v1)
   prefer_browser: true
+  # Static card is debug-only. Production must use payment.vcc.enabled=true.
   card:
     number: ""
     expiry: ""              # MM/YY
@@ -34,6 +35,36 @@ payment:
     first_name: ""
     last_name: ""
     email: ""
+  # Dings VCC flow (must match crawler-vcc-payment-api-docs):
+  # persist client_request_id → create → sensitive-details → supplier pay →
+  # OTP if 3DS → only after confirmed success → POST /api/v2/procurement-payment-events
+  vcc:
+    enabled: false
+    base_url: "https://dings.133.cn/online/dings_vcc_ticket"
+    expected_env: "online"
+    # Must equal deploy VCC_CARD_AMOUNT / VCC_CARD_CURRENCY (confirm with payment team).
+    card_amount: "50.00"
+    card_currency: "EUR"
+    card_bin: "NORMAL"
+    # Leave empty until payment team confirms MCC for Vivaticket / museum tickets.
+    allowed_merchant_categories: ""
+    # Must match a server profile — do NOT copy small_train_official.
+    pnr_source: "cenacolo_vivaticket"
+    pay_currency: "EUR"
+    expected_merchant: ""
+    persist_dir: ""           # default: $CENACOLO_HOME/var/artifacts/vcc
+    otp_max_age_seconds: 600
+    client_cert: ""
+    client_key: ""
+
+  # 支付队列：锁座成功入队 + HTTP wake；Mongo locked 兜底扫库
+  pay_queue:
+    enabled: true
+    queue_dir: ""                 # 默认 $CENACOLO_HOME/var/pay_queue
+    wake_url: "http://127.0.0.1:18765/wake"
+    wake_listen_host: "127.0.0.1"
+    wake_listen_port: 18765
+    mongo_fallback_seconds: 15
 
 browser:
   headless: true

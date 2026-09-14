@@ -43,6 +43,25 @@ def reap_expired(store: Any, now: datetime | None = None) -> int:
             lease_until = (order.get("worker") or {}).get("lease_until")
             if not lease_until or lease_until >= now_iso:
                 continue
+            deadline = (order.get("result") or {}).get("deadline_at") or ""
+            # Pay worker died but seat window still open → put back to locked for retry.
+            if status == "paying" and deadline and deadline > now_iso:
+                patch_order(
+                    store,
+                    order["order_id"],
+                    {
+                        "status": "locked",
+                        "worker.worker_id": None,
+                        "worker.lease_token": None,
+                        "worker.lease_until": deadline,
+                        "last_error.code": "PAY_LEASE_EXPIRED",
+                        "last_error.stage": "pay",
+                        "last_error.message": "paying lease expired; requeue locked for pay",
+                        "last_error.retryable": True,
+                    },
+                )
+                recovered += 1
+                continue
             patch_order(
                 store,
                 order["order_id"],

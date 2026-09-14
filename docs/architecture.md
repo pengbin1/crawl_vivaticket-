@@ -1,41 +1,55 @@
-# Architecture — Cenacolo 方案 B
+# Architecture — Cenacolo 方案 B（锁座 / 支付拆分）
 
 ## 组件
 
-| 组件 | 路径 | 职责 |
+| 组件 | 入口 | 职责 |
 |------|------|------|
-| buy-worker | `services/buy` | 轮询领单、租账号、锁座、回写 `payment_url` |
-| buy-reaper | 同上 `--reap` | 回收过期订单/账号租约 |
-| register | `services/register` | 163 邮箱注册激活 Vivaticket，写入账号池 |
-| Mongo HTTP | dingstest | 订单/账号真相源 |
-| 预约 API | 外部 | 写 `cenacolo_orders` |
-| VCC | 外部 | 二期自动支付记账 |
+| lock-worker | `run_worker.py` | 领单、租账号、锁座、写 `payment_url`，立刻释放账号抢下一单 |
+| pay-worker | `run_pay_worker.py` | 领取 `locked` → `paying` → 开卡/填卡/上报 → `paid` |
+| buy-reaper | `--reap` / timer | 回收过期租约；`paying` 宕机且窗口未过 → 退回 `locked` |
+| register | `services/register` | 养号写入账号池 |
+| VCC | `payment.vcc` | 仅支付进程在确认有支付链接后开卡 |
 
 ## 数据流
 
 ```text
-用户预约 → cenacolo_orders(queued)
-                ↓
-         buy-worker claim
-                ↓
-    reserve vivaticket_accounts(ready)
-                ↓
-         WAF → login → inventory → captcha → lock
-                ↓
-         order.status=locked + payment_url
-                ↓
-         (phase2) pay → paid / used
+queued → lock-worker → locked + payment_url
+              ↓
+         ① 写入本地支付队列 var/pay_queue/pending
+         ② POST http://127.0.0.1:18765/wake 唤醒支付
+              ↓
+pay-worker：优先出队 → claim locked→paying → 开卡/支付
+              ↓ 成功
+         出队(done) + status=paid
+              ↓ 可重试失败
+         回队 + status=locked（复用同一 VCC 幂等键，不换卡）
+              ↓
+         Mongo 兜底：即使 wake/队列丢了，仍定期扫 locked
 ```
 
-## 一期边界
+## 为什么拆
 
-- Worker **默认不自动支付**（`auto_pay=False`）。  
-- 支付引擎代码在 `services/buy/payer/`，供 `pay_only.py` / 二期使用。  
-- 养号与抢票进程隔离，避免浏览器配置互相干扰。
+- 抢票吞吐：锁座不等支付
+- 不误开卡：没有 payment_url 不会进支付
+- 队列 + wake：少空转查库；Mongo 双保险
+- 失败复用卡：同一 `client_request_id` / 订单上已写的 `vcc_order_id`，禁止盲目再开一张
 
-## 日志
+## 状态要点
 
-- 环境变量 `CENACOLO_HOME`（默认 monorepo 根）  
-- 文件：`$CENACOLO_HOME/var/log/{buy-worker,buy-once,register}.log`  
-- stdout 交给 systemd/journald  
-- 禁止记录卡号、CVV、完整 cookie、打码 token  
+| status | 含义 |
+|--------|------|
+| `locked` | 已有支付链接，在队列或等扫库 |
+| `paying` | 支付 Worker 已领取 |
+| `paid` | 成功并出队 |
+| `manual_review` | 硬失败 / 窗口过期 |
+
+## 本地
+
+```bash
+python3 run_worker.py --once          # 锁座 + 入队 + wake
+python3 run_pay_worker.py             # 常驻：听 /wake + 消费队列 + 扫库
+```
+
+队列目录：`$CENACOLO_HOME/var/pay_queue/{pending,processing,done,dead}`  
+Wake：`POST http://127.0.0.1:18765/wake`  
+日本机：`deploy/japan-worker` 同时装 lock + pay。

@@ -23,7 +23,6 @@ from worker.orders import (
 logger = get_logger("cenacolo_worker")
 
 LockerFn = Callable[[AppConfig], tuple[Any, Any, Any]]
-PayFn = Callable[..., Any]
 
 
 def process_once(
@@ -32,25 +31,22 @@ def process_once(
     worker_id: str,
     *,
     locker_fn: LockerFn | None = None,
-    pay_fn: PayFn | None = None,
     now: Any = None,
     no_inventory_wait_seconds: int = 60,
-    auto_pay: bool = False,
 ) -> dict[str, Any] | None:
     """
     Claim one order, reserve one account, lock a seat, write payment_url.
-    Phase 1 does not pay unless auto_pay=True (still unused by default).
+    Does NOT pay — hand off to run_pay_worker (status=locked).
     """
-    del pay_fn  # phase-1: lock only; kept so tests can assert it is not called
     order = claim_order(store, worker_id, now=now)
     if not order:
         return None
 
     account = reserve_account(store, order["order_id"], worker_id, now=now)
     if not account:
-        logger.warning("[worker] no ready account for %s", order.get("order_no"))
+        logger.warning("[锁座Worker] 无可用账号 order=%s", order.get("order_no"))
         notify(
-            f"[cenacolo_worker] NO_ACCOUNT order={order.get('order_no')}",
+            f"[cenacolo_worker] 无账号 order={order.get('order_no')}",
             base_cfg.feishu_webhook,
             base_cfg.feishu_secret,
         )
@@ -90,7 +86,7 @@ def process_once(
             try:
                 renew_lease(store, order["order_id"], worker_id, token)
             except Exception as exc:
-                logger.warning("[worker] heartbeat failed: %s", exc)
+                logger.warning("[锁座Worker] 心跳失败: %s", exc)
 
     beat = threading.Thread(target=_heartbeat, daemon=True)
     beat.start()
@@ -98,23 +94,63 @@ def process_once(
     try:
         cfg = build_app_config(base_cfg, order, account)
         logger.info(
-            "[worker] lock order=%s account=%s dates=%s",
+            "[锁座Worker] 开始锁座 order=%s account=%s dates=%s",
             order.get("order_no"),
             cfg.email,
             cfg.target_dates,
         )
         job, _session, page = locker(cfg)
         write_locked(store, order["order_id"], job)
+        # Free account for other lock attempts; payment uses payment_url only.
+        release_account(store, account["email"], to_status="ready")
         finish_run(store, run_id, stage="lock", status="success")
-        if auto_pay:
-            raise RuntimeError("auto_pay is not enabled in phase 1")
+
+        # Dual insurance: durable queue + HTTP wake (pay worker also scans Mongo).
+        try:
+            from worker.pay_notify import notify_pay_wake
+            from worker.pay_queue import PayQueueJob
+            from worker.queue_util import make_pay_queue
+
+            if base_cfg.pay_queue.enabled:
+                q = make_pay_queue(base_cfg)
+                deadline_iso = (
+                    job.deadline_at.isoformat()
+                    if hasattr(job.deadline_at, "isoformat")
+                    else str(job.deadline_at)
+                )
+                q.enqueue(
+                    PayQueueJob(
+                        order_id=str(order["order_id"]),
+                        order_no=str(order.get("order_no") or ""),
+                        custref=job.custref,
+                        payment_url=job.payment_url,
+                        deadline_at=deadline_iso,
+                    )
+                )
+                notify_pay_wake(
+                    base_cfg.pay_queue.wake_url,
+                    order_id=str(order["order_id"]),
+                    order_no=str(order.get("order_no") or ""),
+                    custref=job.custref,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[锁座Worker] 入队/通知失败（Mongo locked 仍可被支付扫到）: %s",
+                exc,
+            )
+
         notify(
-            f"[cenacolo_worker] LOCKED {order.get('order_no')} "
-            f"{job.date} {job.time} custref={job.custref}\n{job.payment_url}",
+            f"[cenacolo_worker] 已锁座 {order.get('order_no')} "
+            f"{job.date} {job.time} custref={job.custref}\n"
+            f"已入支付队列\n{job.payment_url}",
             base_cfg.feishu_webhook,
             base_cfg.feishu_secret,
         )
-        logger.info("[worker] locked order=%s custref=%s", order.get("order_no"), job.custref)
+        logger.info(
+            "[锁座Worker] 成功 order=%s custref=%s → locked + 支付队列",
+            order.get("order_no"),
+            job.custref,
+        )
         return get_order(store, order["order_id"])
     except Exception as exc:
         if is_no_inventory(exc):
@@ -139,7 +175,7 @@ def process_once(
                 increment_attempts=False,
                 next_in_seconds=no_inventory_wait_seconds,
             )
-            logger.info("[worker] no inventory order=%s", order.get("order_no"))
+            logger.info("[锁座Worker] 无票 order=%s", order.get("order_no"))
             return updated
         finish_run(
             store,
@@ -151,9 +187,9 @@ def process_once(
             error_message=str(exc),
         )
         release_account(store, account["email"], to_status="ready")
-        logger.exception("[worker] lock failed order=%s: %s", order.get("order_no"), exc)
+        logger.exception("[锁座Worker] 失败 order=%s: %s", order.get("order_no"), exc)
         notify(
-            f"[cenacolo_worker] ERROR {order.get('order_no')}: {exc}",
+            f"[cenacolo_worker] 锁座失败 {order.get('order_no')}: {exc}",
             base_cfg.feishu_webhook,
             base_cfg.feishu_secret,
         )

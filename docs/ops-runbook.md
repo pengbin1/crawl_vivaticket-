@@ -3,63 +3,57 @@
 ## 日常检查
 
 ```bash
-# ready 账号水位（Mongo raw-query 或自建脚本）
-# Worker 是否活着
-systemctl status cenacolo-buy-worker
-journalctl -u cenacolo-buy-worker -n 100 --no-pager
+systemctl status cenacolo-buy-worker cenacolo-buy-pay-worker
+journalctl -u cenacolo-buy-worker -n 80 --no-pager
+journalctl -u cenacolo-buy-pay-worker -n 80 --no-pager
 
-# 文件日志
-tail -f /opt/cenacolo/var/log/buy-worker.log
+tail -f $CENACOLO_HOME/var/log/buy-worker.log
+tail -f $CENACOLO_HOME/var/log/buy-pay-worker.log
 ```
 
-关注：`NO_ACCOUNT`、连续 captcha 失败、lease 堆积、`payment_url` 长时间未付。
+关注：`NO_ACCOUNT`、captcha 失败、lease 堆积、`locked` 超时未付、`manual_review`。
 
 ## 启停（日本机）
 
 ```bash
-# 一键启动（pengb_dev 下 clone 成 cenacolo 后）
 cd /root/pengb_dev/cenacolo
-sudo bash deploy/japan-worker/start.sh
-
-# 一键恢复：git 拉最新 + 装依赖 + 重启
+sudo bash deploy/japan-worker/start.sh      # lock + pay + reaper
 sudo bash deploy/japan-worker/recover.sh
-
 sudo bash deploy/japan-worker/stop.sh
 bash deploy/japan-worker/status.sh
-
-# 或统一入口
-sudo bash /opt/cenacolo/deploy/japan-worker/ctl.sh start|stop|restart|recover|status
 ```
-
-等价 systemd：
 
 ```bash
 sudo systemctl start|stop|restart cenacolo-buy-worker
+sudo systemctl start|stop|restart cenacolo-buy-pay-worker
 sudo systemctl start cenacolo-buy-reaper.timer
 ```
+
+未就绪 VCC 时：可先 `systemctl stop cenacolo-buy-pay-worker`，或保持 `payment.vcc.enabled=false`。
 
 ## 发版
 
 ```bash
-cd /opt/cenacolo
+cd $CENACOLO_HOME
 git pull
 cd services/buy && .venv/bin/pip install -r requirements.txt
-sudo systemctl restart cenacolo-buy-worker
+sudo systemctl restart cenacolo-buy-worker cenacolo-buy-pay-worker
 ```
 
 ## 测试订单
 
 ```bash
-cd /opt/cenacolo/services/buy
-export CENACOLO_HOME=/opt/cenacolo
+cd $CENACOLO_HOME/services/buy
+export CENACOLO_HOME=...
 .venv/bin/python run_worker.py --seed-order --any --passengers Peng:Bin
-.venv/bin/python run_worker.py --once
+.venv/bin/python run_worker.py --once          # 锁座 → locked
+.venv/bin/python run_pay_worker.py --once      # 支付 → paid（需 VCC 配置）
 ```
 
 ## 养号
 
 ```bash
-cd /opt/cenacolo/services/register   # 或养号专用机同路径
+cd $CENACOLO_HOME/services/register
 .venv/bin/python pool_register.py --count 20
 .venv/bin/python pool_register.py --list
 ```
@@ -68,12 +62,13 @@ cd /opt/cenacolo/services/register   # 或养号专用机同路径
 
 | 现象 | 排查 |
 |------|------|
-| NO_ACCOUNT | register 是否在刷号；账号 status 是否 ready |
+| NO_ACCOUNT | register 水位；账号是否 ready |
 | captcha 余额不足 | YesCaptcha getBalance |
-| Incapsula / 短 HTML | Chrome 是否可用；代理；WAF cookie |
-| Mongo error | 日本机访问 dingstest；代理配置 |
-| 锁座成功无支付 | 一期预期；用 payment_url + pay_only 或人工 |
+| Incapsula / 短 HTML | Chrome / 代理 / WAF |
+| locked 一直不付 | pay-worker 是否在跑；deadline 是否过期 |
+| 支付失败 manual_review | 日志 `vcc_order_id` / `purchase_id`；勿盲目重开卡 |
+| 误开卡 | 确认只有 pay-worker 且 `vcc.enabled=true` |
 
 ## 敏感信息
 
-日志、飞书、artifacts 文件名可用 order_no；**不要**把 `etc/*.local.yaml` 提交或 scp 到公开位置。
+日志可用 order_no / custref / vcc_order_id；禁止 PAN、CVV、OTP、完整 cookie。

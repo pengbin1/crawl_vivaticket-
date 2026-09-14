@@ -29,6 +29,7 @@ USER_NAME="${USER_NAME:-root}"
 BUY_DIR="$CENACOLO_HOME/services/buy"
 CFG="$CENACOLO_HOME/etc/buy.local.yaml"
 WORKER_UNIT="cenacolo-buy-worker.service"
+PAY_WORKER_UNIT="cenacolo-buy-pay-worker.service"
 REAPER_TIMER="cenacolo-buy-reaper.timer"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
@@ -95,10 +96,11 @@ install_units() {
   fi
   [[ -d "$src" ]] || die "缺少 systemd 目录: $src"
   render_unit "$src/cenacolo-buy-worker.service" /etc/systemd/system/cenacolo-buy-worker.service
+  render_unit "$src/cenacolo-buy-pay-worker.service" /etc/systemd/system/cenacolo-buy-pay-worker.service
   render_unit "$src/cenacolo-buy-reaper.service" /etc/systemd/system/cenacolo-buy-reaper.service
   cp "$src/cenacolo-buy-reaper.timer" /etc/systemd/system/cenacolo-buy-reaper.timer
   systemctl daemon-reload
-  systemctl enable "$WORKER_UNIT" "$REAPER_TIMER" >/dev/null
+  systemctl enable "$WORKER_UNIT" "$PAY_WORKER_UNIT" "$REAPER_TIMER" >/dev/null
 }
 
 cmd_start() {
@@ -112,19 +114,23 @@ cmd_start() {
   if [[ "$USER_NAME" != "root" ]]; then
     chown -R "$USER_NAME:$USER_NAME" "$CENACOLO_HOME" || true
   fi
-  log "启动 $WORKER_UNIT + $REAPER_TIMER"
+  log "启动 $WORKER_UNIT + $PAY_WORKER_UNIT + $REAPER_TIMER"
   systemctl start "$WORKER_UNIT"
+  systemctl start "$PAY_WORKER_UNIT"
   systemctl start "$REAPER_TIMER"
   systemctl --no-pager --full status "$WORKER_UNIT" || true
+  systemctl --no-pager --full status "$PAY_WORKER_UNIT" || true
   log "OK started"
-  log "journal: journalctl -u $WORKER_UNIT -f"
-  log "file:    $CENACOLO_HOME/var/log/buy-worker.log"
+  log "journal lock: journalctl -u $WORKER_UNIT -f"
+  log "journal pay:  journalctl -u $PAY_WORKER_UNIT -f"
+  log "file:         $CENACOLO_HOME/var/log/buy-worker.log"
 }
 
 cmd_stop() {
   need_root stop
-  log "停止 worker / reaper"
+  log "停止 lock-worker / pay-worker / reaper"
   systemctl stop "$WORKER_UNIT" || true
+  systemctl stop "$PAY_WORKER_UNIT" || true
   systemctl stop "$REAPER_TIMER" || true
   log "OK stopped"
 }
@@ -132,6 +138,7 @@ cmd_stop() {
 cmd_restart() {
   need_root restart
   systemctl restart "$WORKER_UNIT"
+  systemctl restart "$PAY_WORKER_UNIT"
   systemctl restart "$REAPER_TIMER" || true
   cmd_status
 }
@@ -141,13 +148,19 @@ cmd_status() {
   echo "config: $CFG $([ -f "$CFG" ] && echo OK || echo MISSING)"
   echo "venv:   $BUY_DIR/.venv/bin/python $([ -x "$BUY_DIR/.venv/bin/python" ] && echo OK || echo MISSING)"
   if command -v systemctl >/dev/null 2>&1; then
-    echo "worker: $(systemctl is-active "$WORKER_UNIT" 2>/dev/null || echo unknown)"
+    echo "lock:   $(systemctl is-active "$WORKER_UNIT" 2>/dev/null || echo unknown)"
+    echo "pay:    $(systemctl is-active "$PAY_WORKER_UNIT" 2>/dev/null || echo unknown)"
     echo "reaper: $(systemctl is-active "$REAPER_TIMER" 2>/dev/null || echo unknown)"
     systemctl --no-pager --full status "$WORKER_UNIT" 2>/dev/null || true
+    systemctl --no-pager --full status "$PAY_WORKER_UNIT" 2>/dev/null || true
   fi
   if [[ -f "$CENACOLO_HOME/var/log/buy-worker.log" ]]; then
-    echo "---- last 30 log lines ----"
-    tail -n 30 "$CENACOLO_HOME/var/log/buy-worker.log" || true
+    echo "---- last 20 buy-worker.log ----"
+    tail -n 20 "$CENACOLO_HOME/var/log/buy-worker.log" || true
+  fi
+  if [[ -f "$CENACOLO_HOME/var/log/buy-pay-worker.log" ]]; then
+    echo "---- last 20 buy-pay-worker.log ----"
+    tail -n 20 "$CENACOLO_HOME/var/log/buy-pay-worker.log" || true
   fi
 }
 
@@ -170,6 +183,7 @@ cmd_recover() {
   fi
   log "重启服务"
   systemctl restart "$WORKER_UNIT"
+  systemctl restart "$PAY_WORKER_UNIT"
   systemctl restart "$REAPER_TIMER" || systemctl start "$REAPER_TIMER"
   sleep 1
   cmd_status

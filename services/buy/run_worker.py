@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -22,7 +23,7 @@ logger = get_logger("buy.worker")
 
 
 def _worker_id() -> str:
-    return f"{socket.gethostname()}-{os.getpid()}"
+    return f"lock-{socket.gethostname()}-{os.getpid()}"
 
 
 def _parse_passengers(raw: str) -> list[dict[str, str]]:
@@ -42,7 +43,7 @@ def _parse_passengers(raw: str) -> list[dict[str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Cenacolo reservation worker (phase 1: lock only, no auto-pay)"
+        description="Cenacolo lock worker（只锁座：写 payment_url，不支付）"
     )
     parser.add_argument(
         "--config",
@@ -86,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             use_any_available=args.any or not dates,
         )
         logger.info(
-            "[worker] seeded order_no=%s order_id=%s dates=%s any=%s",
+            "[锁座Worker] 已播种订单 order_no=%s order_id=%s dates=%s any=%s",
             doc["order_no"],
             doc["order_id"],
             dates,
@@ -96,12 +97,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.reap:
         n = reap_expired(store)
-        logger.info("[worker] reaped %s expired leases", n)
+        logger.info("[锁座Worker] reaper 回收 %s 条", n)
         return 0
 
     cfg = load_config(args.config)
     worker_id = _worker_id()
-    logger.info("[worker] start worker_id=%s lock-only phase1", worker_id)
+    logger.info(
+        "[锁座Worker] 启动 worker_id=%s（只锁座，支付请跑 run_pay_worker.py）",
+        worker_id,
+    )
 
     idle = 0
     while True:
@@ -109,10 +113,15 @@ def main(argv: list[str] | None = None) -> int:
             reap_expired(store)
             outcome = process_once(store, cfg, worker_id)
         except Exception as exc:
-            logger.exception("[worker] loop error: %s", exc)
+            logger.exception("[锁座Worker] 循环异常: %s", exc)
             outcome = None
         if args.once:
-            return 0 if outcome is None or outcome.get("status") in {"locked", "waiting_inventory", "retry_wait"} else 1
+            return (
+                0
+                if outcome is None
+                or outcome.get("status") in {"locked", "waiting_inventory", "retry_wait"}
+                else 1
+            )
         if outcome:
             idle = 0
             time.sleep(max(args.poll, 0.5))
