@@ -67,7 +67,16 @@ python pool_register.py --count 5
 ```
 
 `export CENACOLO_HOME=/opt/cenacolo`  
-systemd 单元见 `deploy/japan-worker/`、`deploy/register-host/`。
+
+一键脚本（日本机）：
+
+```bash
+sudo bash deploy/japan-worker/start.sh      # 一键启动
+sudo bash deploy/japan-worker/recover.sh    # 一键恢复（拉代码+重启）
+bash deploy/japan-worker/status.sh
+```
+
+更多见 `deploy/japan-worker/`、`docs/ops-runbook.md`。
 
 ## 文档
 
