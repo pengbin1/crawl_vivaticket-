@@ -200,9 +200,54 @@ def report_after_success(
     ctx.report_payload = payload
     data = submit_payment_report(client, store, payload)
     ctx.purchase_id = str(data.get("purchase_id") or "")
+    asset_ids = [str(a) for a in (data.get("asset_ids") or []) if a]
     logger.info(
         "[VCC][支付上报] 已受理 purchase_id=%s asset_ids=%s",
         ctx.purchase_id or "-",
-        data.get("asset_ids") or [],
+        asset_ids,
     )
+
+    loss_results: list = []
+    if app_cfg.vcc.auto_confirm_loss and asset_ids:
+        from payer.vcc.errors import VccError, VccManualRequired
+        from payer.vcc.loss import confirm_losses_for_assets
+
+        logger.info(
+            "[VCC][损耗] auto_confirm_loss=true，对不可售/不退票资产报损 "
+            "count=%s reason=%s",
+            len(asset_ids),
+            app_cfg.vcc.loss_reason,
+        )
+        try:
+            loss_results = confirm_losses_for_assets(
+                client,
+                store,
+                asset_ids=asset_ids,
+                custref=job.custref,
+                business_order_no=job.business_order_no,
+                reason=app_cfg.vcc.loss_reason,
+            )
+        except (VccManualRequired, VccError) as exc:
+            # Procurement already committed; loss failure must not undo that fact.
+            logger.error(
+                "[VCC][损耗] 报损失败（采购已成功，需人工补报） code=%s err=%s "
+                "asset_ids=%s",
+                getattr(exc, "code", "") or "-",
+                exc,
+                asset_ids,
+            )
+            loss_results = [
+                {
+                    "error": True,
+                    "code": getattr(exc, "code", "") or "loss_failed",
+                    "message": str(exc)[:300],
+                    "asset_ids": asset_ids,
+                }
+            ]
+    elif app_cfg.vcc.auto_confirm_loss and not asset_ids:
+        logger.warning(
+            "[VCC][损耗] auto_confirm_loss=true 但上报响应无 asset_ids，跳过报损"
+        )
+
+    data = {**data, "asset_ids": asset_ids, "loss_results": loss_results}
     return data

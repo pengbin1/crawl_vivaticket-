@@ -104,4 +104,5 @@ def payment_job_from_order(order: dict[str, Any]) -> PaymentJob:
         vcc_application_id=str(result.get("vcc_application_id") or ""),
         vcc_order_id=str(result.get("vcc_order_id") or ""),
         vcc_card_id=str(result.get("vcc_card_id") or ""),
+        business_order_no=str(order.get("order_no") or ""),
     )

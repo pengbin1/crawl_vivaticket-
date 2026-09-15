@@ -291,23 +291,36 @@ def write_paid(
     vcc_order_id: str = "",
     final_url: str = "",
     payment_method: str = "",
+    asset_ids: list[str] | None = None,
+    loss_results: list[dict[str, Any]] | None = None,
 ) -> None:
-    patch_order(
-        store,
-        order_id,
-        {
-            "status": "paid",
-            "paid_at": iso_now(),
-            "result.purchase_id": purchase_id or None,
-            "result.vcc_order_id": vcc_order_id or None,
-            "result.final_url": final_url or None,
-            "result.payment_method": payment_method or None,
-            "worker.worker_id": None,
-            "worker.lease_token": None,
-            "last_error.code": None,
-            "last_error.message": None,
-        },
-    )
+    fields: dict[str, Any] = {
+        "status": "paid",
+        "paid_at": iso_now(),
+        "result.purchase_id": purchase_id or None,
+        "result.vcc_order_id": vcc_order_id or None,
+        "result.final_url": final_url or None,
+        "result.payment_method": payment_method or None,
+        "worker.worker_id": None,
+        "worker.lease_token": None,
+        "last_error.code": None,
+        "last_error.message": None,
+    }
+    if asset_ids is not None:
+        fields["result.asset_ids"] = list(asset_ids)
+    if loss_results is not None:
+        # Non-sensitive loss summary only.
+        fields["result.loss_results"] = [
+            {
+                "asset_id": r.get("asset_id"),
+                "adjustment_id": r.get("adjustment_id"),
+                "finance_bundle_id": r.get("finance_bundle_id"),
+                "already_confirmed": r.get("already_confirmed"),
+            }
+            for r in loss_results
+            if isinstance(r, dict)
+        ]
+    patch_order(store, order_id, fields)
 
 
 def write_pay_failed(

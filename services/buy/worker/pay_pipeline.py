@@ -121,6 +121,8 @@ def process_pay_once(
                 vcc_order_id=str(getattr(result, "vcc_order_id", "") or ""),
                 final_url=str(getattr(result, "final_url", "") or ""),
                 payment_method=str(getattr(result, "method", "") or ""),
+                asset_ids=list(getattr(result, "asset_ids", None) or []),
+                loss_results=list(getattr(result, "loss_results", None) or []),
             )
             finish_run(store, run_id, stage="pay", status="success")
             if queue is not None:

@@ -88,6 +88,38 @@ class VccStore:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def loss_path(self, request_id: str) -> Path:
+        return self.root / f"loss_{_safe_name(request_id)}.json"
+
+    def loss_result_path(self, request_id: str) -> Path:
+        return self.root / f"loss_result_{_safe_name(request_id)}.json"
+
+    def save_loss_payload(self, request_id: str, payload: dict[str, Any]) -> Path:
+        _assert_safe(payload)
+        path = self.loss_path(request_id)
+        if path.exists():
+            return path
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info(
+            "[VCC][落盘] 首次损耗请求快照已保存 request_id=%s asset_id=%s 文件=%s",
+            request_id,
+            payload.get("asset_id") or "-",
+            path.name,
+        )
+        return path
+
+    def load_loss_payload(self, request_id: str) -> dict[str, Any] | None:
+        path = self.loss_path(request_id)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def save_loss_result(self, request_id: str, data: dict[str, Any]) -> Path:
+        _assert_safe(data)
+        path = self.loss_result_path(request_id)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return path
+
 
 def _safe_name(value: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in value)[:180]

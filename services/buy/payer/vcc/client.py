@@ -101,6 +101,21 @@ class VccClient:
     def get_purchase(self, purchase_id: str) -> dict[str, Any]:
         return self._request("GET", f"/api/v1/purchases/{purchase_id}")
 
+    def get_asset(self, asset_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/api/v1/assets/{asset_id}")
+
+    def report_loss(
+        self, asset_id: str, body: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        return self._request_status(
+            "POST",
+            f"/api/v1/assets/{asset_id}/losses",
+            json_body=body,
+        )
+
+    def get_finance_bundle(self, finance_bundle_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/api/v1/finance-bundles/{finance_bundle_id}")
+
     def _url(self, path: str) -> str:
         return urljoin(self.base_url, path.lstrip("/"))
 
@@ -208,7 +223,19 @@ class VccClient:
         elif not sensitive and step == "PAYMENT_REPORT" and data:
             extra = (
                 f" purchase_id={data.get('purchase_id') or '-'} "
-                f"txn={data.get('payment_transaction_id') or '-'}"
+                f"txn={data.get('payment_transaction_id') or '-'} "
+                f"asset_ids={data.get('asset_ids') or []}"
+            )
+        elif not sensitive and step == "ASSET_GET" and data:
+            extra = (
+                f" asset_id={data.get('asset_id') or '-'} "
+                f"status={data.get('status') or '-'}"
+            )
+        elif not sensitive and step == "ASSET_LOSS" and data:
+            extra = (
+                f" asset_id={data.get('asset_id') or '-'} "
+                f"adjustment_id={data.get('adjustment_id') or '-'} "
+                f"finance_bundle_id={data.get('finance_bundle_id') or '-'}"
             )
         logger.info(
             "[VCC][%s] http=%s code=%s env=%s trace_id=%s req_id=%s "
@@ -253,6 +280,12 @@ def _step_name(path: str) -> str:
         return "PAYMENT_REPORT"
     if "/purchases/" in p:
         return "PURCHASE_GET"
+    if "/finance-bundles/" in p:
+        return "FINANCE_GET"
+    if "/assets/" in p and p.endswith("/losses"):
+        return "ASSET_LOSS"
+    if "/assets/" in p:
+        return "ASSET_GET"
     return "VCC_HTTP"
 
 
@@ -268,6 +301,9 @@ _STEP_CN = {
     "OTP_CANCEL": "取消验证码等待",
     "PAYMENT_REPORT": "支付成功上报",
     "PURCHASE_GET": "查询采购记录",
+    "ASSET_GET": "查询库存资产",
+    "ASSET_LOSS": "资产损耗上报",
+    "FINANCE_GET": "查询财务批次",
     "VCC_HTTP": "VCC请求",
 }
 

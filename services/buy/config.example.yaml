@@ -54,6 +54,9 @@ payment:
     expected_merchant: ""
     persist_dir: ""           # default: $CENACOLO_HOME/var/artifacts/vcc
     otp_max_age_seconds: 600
+    # 调试阶段：采购上报成功后，对不可售且不退供应商的票自动调 /losses
+    auto_confirm_loss: false
+    loss_reason: "debug_unsellable_no_refund"
     client_cert: ""
     client_key: ""
 

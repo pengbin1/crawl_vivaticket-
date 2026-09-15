@@ -183,15 +183,24 @@ def _finish(
             )
             result.vcc_order_id = vcc_ctx.application.order_id
             result.purchase_id = str(data.get("purchase_id") or "")
+            result.asset_ids = [str(a) for a in (data.get("asset_ids") or []) if a]
+            result.loss_results = list(data.get("loss_results") or [])
+            loss_note = ""
+            if result.loss_results:
+                loss_note = f"; 已损耗确认 {len(result.loss_results)} 张"
             result.message = (
                 f"{result.message}; 已上报 purchase_id={result.purchase_id}"
+                f"{loss_note}"
             )
             result.method = "vcc"
             logger.info(
-                "[支付] 全流程成功 custref=%s vcc_order_id=%s purchase_id=%s",
+                "[支付] 全流程成功 custref=%s vcc_order_id=%s purchase_id=%s "
+                "asset_ids=%s loss=%s",
                 job.custref,
                 result.vcc_order_id,
                 result.purchase_id,
+                result.asset_ids,
+                len(result.loss_results),
             )
         except (VccManualRequired, VccError) as exc:
             logger.error(

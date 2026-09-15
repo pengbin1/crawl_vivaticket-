@@ -59,6 +59,8 @@ class PaymentJob:
     vcc_application_id: str = ""
     vcc_order_id: str = ""
     vcc_card_id: str = ""
+    # Cenacolo order_no for finance loss order_id (not VCC card order_id).
+    business_order_no: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -77,3 +79,5 @@ class PayResult:
     confirmed: bool = False
     vcc_order_id: str = ""
     purchase_id: str = ""
+    asset_ids: list[str] = field(default_factory=list)
+    loss_results: list[dict[str, Any]] = field(default_factory=list)

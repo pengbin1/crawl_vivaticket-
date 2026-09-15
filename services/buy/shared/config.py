@@ -52,6 +52,9 @@ class VccConfig:
     client_cert: str = ""
     client_key: str = ""
     otp_max_age_seconds: int = 600
+    # Debug / unsellable tickets: after procurement, confirm LOSS (cannot sell, no refund).
+    auto_confirm_loss: bool = False
+    loss_reason: str = "debug_unsellable_no_refund"
 
 
 @dataclass
@@ -190,6 +193,16 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             os.getenv("CENACOLO_VCC_CLIENT_KEY") or vcc_raw.get("client_key") or ""
         ),
         otp_max_age_seconds=int(vcc_raw.get("otp_max_age_seconds") or 600),
+        auto_confirm_loss=bool(
+            os.getenv(
+                "CENACOLO_VCC_AUTO_LOSS",
+                str(vcc_raw.get("auto_confirm_loss") or "false"),
+            ).lower()
+            in {"1", "true", "yes", "on"}
+        ),
+        loss_reason=str(
+            vcc_raw.get("loss_reason") or "debug_unsellable_no_refund"
+        ),
     )
 
     pq_raw = _deep_get(data, "payment", "pay_queue", default={}) or {}

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from payer.vcc.amounts import cents_to_major, expiry_mm_yy, format_major, split_cardholder_name
+from payer.vcc.loss import build_loss_order_id, build_loss_request_id
 from payer.vcc.open_card import build_client_request_id
 from payer.vcc.otp import build_payment_id
 from payer.vcc.report import build_report_payload, build_resource_key
@@ -28,6 +29,30 @@ def test_amounts():
 def test_ids():
     assert build_client_request_id("VIVATK123") == "CENACOLO-CARD-VIVATK123-1"
     assert build_payment_id("VIVATK123") == "PAY-VIVATK123"
+    rid = build_loss_request_id("VIVATK9", "AST-ABCDEF1234567890", 1)
+    assert rid.startswith("CENACOLO-LOSS-VIVATK9-")
+    assert rid.endswith("-1")
+    assert build_loss_order_id(business_order_no="CEN123", custref="VIVATK9") == "CEN123"
+    assert build_loss_order_id(business_order_no="", custref="VIVATK9") == "VIVATK9"
+
+
+def test_loss_store_idempotent():
+    store = VccStore(Path(tempfile.mkdtemp()))
+    payload = {
+        "asset_id": "AST-1",
+        "request_id": "CENACOLO-LOSS-X-1",
+        "order_id": "CEN1",
+        "reason": "debug_unsellable_no_refund",
+        "confirmed_at": "2026-09-15T10:00:00+08:00",
+    }
+    store.save_loss_payload("CENACOLO-LOSS-X-1", payload)
+    store.save_loss_payload(
+        "CENACOLO-LOSS-X-1",
+        {**payload, "reason": "changed"},  # must not overwrite
+    )
+    loaded = store.load_loss_payload("CENACOLO-LOSS-X-1")
+    assert loaded is not None
+    assert loaded["reason"] == "debug_unsellable_no_refund"
 
 
 def test_resource_key_and_report(tmp_path: Path | None = None):
@@ -108,6 +133,7 @@ def test_store_rejects_pan():
 if __name__ == "__main__":
     test_amounts()
     test_ids()
+    test_loss_store_idempotent()
     test_resource_key_and_report()
     test_store_rejects_pan()
     print("ok")
